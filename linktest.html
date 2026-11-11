@@ -23,8 +23,10 @@
 <table id="fields"></table>
 <p class="note">Everything above came from the part of the link after "#", which browsers never send to the server. Nothing on this page is stored or sent anywhere.</p>
 <script>
+(function () {
   // Untrusted email content: shown with textContent only, never as HTML.
-  var status = document.getElementById('status');
+  // (Wrapped in a function so names like "status" can't collide with browser globals.)
+  var statusEl = document.getElementById('status');
   var table = document.getElementById('fields');
   function row(label, value, asPre) {
     var tr = table.insertRow();
@@ -38,8 +40,8 @@
     var raw = hash.indexOf('#d=') === 0 ? hash.slice(3) : '';
     if (!raw) throw new Error('No data after "#d=" in the link.');
     var d = JSON.parse(decodeURIComponent(raw));
-    status.className = 'ok';
-    status.textContent = 'RESULT: the link arrived and decoded.';
+    statusEl.className = 'ok';
+    statusEl.textContent = 'RESULT: the link arrived and decoded.';
     row('Full link', location.href.length.toLocaleString() + ' characters');
     row('Data part', raw.length.toLocaleString() + ' characters (encoded)');
     row('Quote', (d.quote || '').length.toLocaleString() + ' characters');
@@ -52,9 +54,10 @@
     var tail = (d.quote || '').slice(-80);
     row('Quote ends with', tail, true);
   } catch (err) {
-    status.className = 'bad';
-    status.textContent = 'RESULT: FAILED: ' + err.message + ' (link length ' + location.href.length.toLocaleString() + ')';
+    statusEl.className = 'bad';
+    statusEl.textContent = 'RESULT: FAILED: ' + err.message + ' (link length ' + location.href.length.toLocaleString() + ')';
   }
+})();
 </script>
 </body>
 </html>
