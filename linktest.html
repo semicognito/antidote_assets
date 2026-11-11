@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Link test</title>
+<style>
+  body { font: 15px/1.45 -apple-system, system-ui, sans-serif; margin: 16px; color: #222; background: #fafafa; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .ok { color: #1b7f3b; font-weight: 600; }
+  .bad { color: #b3261e; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  td { border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; word-break: break-all; }
+  td:first-child { width: 7.5em; color: #555; word-break: normal; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 14em; overflow: auto; }
+  .note { color: #666; font-size: 13px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h1>Sent in Stone: link test</h1>
+<p id="status"></p>
+<table id="fields"></table>
+<p class="note">Everything above came from the part of the link after "#", which browsers never send to the server. Nothing on this page is stored or sent anywhere.</p>
+<script>
+  // Untrusted email content: shown with textContent only, never as HTML.
+  var status = document.getElementById('status');
+  var table = document.getElementById('fields');
+  function row(label, value, asPre) {
+    var tr = table.insertRow();
+    tr.insertCell().textContent = label;
+    var td = tr.insertCell();
+    if (asPre) { var pre = document.createElement('pre'); pre.textContent = value; td.appendChild(pre); }
+    else td.textContent = value;
+  }
+  try {
+    var hash = location.hash || '';
+    var raw = hash.indexOf('#d=') === 0 ? hash.slice(3) : '';
+    if (!raw) throw new Error('No data after "#d=" in the link.');
+    var d = JSON.parse(decodeURIComponent(raw));
+    status.className = 'ok';
+    status.textContent = 'RESULT: the link arrived and decoded.';
+    row('Full link', location.href.length.toLocaleString() + ' characters');
+    row('Data part', raw.length.toLocaleString() + ' characters (encoded)');
+    row('Quote', (d.quote || '').length.toLocaleString() + ' characters');
+    row('To', d.to || '(missing)');
+    row('Subject', d.subject || '(missing)');
+    row('In-Reply-To', d.inReplyTo || '(missing)');
+    row('References', d.references || '(missing)');
+    row('Original date', d.date || '(missing)');
+    row('Quote text', (d.quote || '').slice(0, 1500) + ((d.quote || '').length > 1500 ? '\n…' : ''), true);
+    var tail = (d.quote || '').slice(-80);
+    row('Quote ends with', tail, true);
+  } catch (err) {
+    status.className = 'bad';
+    status.textContent = 'RESULT: FAILED: ' + err.message + ' (link length ' + location.href.length.toLocaleString() + ')';
+  }
+</script>
+</body>
+</html>
