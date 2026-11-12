@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Drive test</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  body { font: 15px/1.45 -apple-system, system-ui, sans-serif; margin: 16px; color: #222; background: #fafafa; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 22px 0 6px; }
+  .ok { color: #1b7f3b; font-weight: 600; }
+  .bad { color: #b3261e; font-weight: 600; }
+  .muted { color: #666; font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  td { border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; word-break: break-all; }
+  td:first-child { width: 8em; color: #555; word-break: normal; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 12em; overflow: auto; }
+  button { font: inherit; padding: 8px 14px; border-radius: 18px; border: 0; background: #0b57d0; color: #fff; margin: 4px 0; }
+</style>
+</head>
+<body>
+<h1>Sent in Stone: Drive test (4b)</h1>
+<p class="muted" id="prep"></p>
+
+<h2>A. Read with the add-on's token (no sign-in)</h2>
+<p id="statusA"></p>
+<table id="tableA"></table>
+
+<h2>B. Sign in on this page and read the same file</h2>
+<p class="muted">Tests whether the page (a different sign-in client in the same Google Cloud project) sees the add-on's hidden folder, and whether sign-in is remembered next time.</p>
+<button id="btnB">Sign in with Google and read</button>
+<p id="statusB"></p>
+
+<h2>C. Clean up</h2>
+<button id="btnC">Delete this file from the hidden folder</button>
+<p id="statusC"></p>
+
+<p class="muted">Email content is shown as plain text only. The file ID and token came after "#" in the link, which browsers don't send to servers; this page removes them from the address bar as soon as it loads.</p>
+
+<script>
+(function () {
+  // Paste the Web client ID from Google Cloud (Google Auth Platform > Clients) here:
+  var CLIENT_ID = '341298470548-ckjh27qvskfrdgo1ckj6jl7qpo786727.apps.googleusercontent.com';
+  var SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+  var API = 'https://www.googleapis.com/drive/v3/files/';
+
+  function $(id) { return document.getElementById(id); }
+  function say(id, cls, text) { var el = $(id); el.className = cls; el.textContent = text; }
+  function row(table, label, value, asPre) {
+    var tr = $(table).insertRow();
+    tr.insertCell().textContent = label;
+    var td = tr.insertCell();
+    if (asPre) { var pre = document.createElement('pre'); pre.textContent = value; td.appendChild(pre); }
+    else td.textContent = value;
+  }
+  function fmt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function storeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function storeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  // 1. Read the fragment, then strip it from the address bar.
+  var params = new URLSearchParams((location.hash || '').slice(1));
+  var fileId = params.get('f');
+  var addonToken = params.get('t');
+  var prepMs = params.get('ms');
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+
+  if (!fileId) {
+    say('statusA', 'bad', 'No file ID in the link. Open this page from the add-on button.');
+    return;
+  }
+  $('prep').textContent = 'Add-on work (read email + save to Drive): ' + (prepMs ? fmt(prepMs) + ' ms' : 'unknown');
+
+  function readFile(token) {
+    var t0 = Date.now();
+    return fetch(API + encodeURIComponent(fileId) + '?alt=media', { headers: { Authorization: 'Bearer ' + token } })
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (b) { throw new Error('HTTP ' + r.status + ': ' + b.slice(0, 200)); });
+        return r.json().then(function (d) { d._ms = Date.now() - t0; return d; });
+      });
+  }
+
+  // A. Add-on token, automatically.
+  if (!addonToken) {
+    say('statusA', 'bad', 'No add-on token in the link.');
+  } else {
+    readFile(addonToken).then(function (d) {
+      say('statusA', 'ok', 'RESULT A: file read with the add-on token, no sign-in (' + fmt(d._ms) + ' ms).');
+      row('tableA', 'To', d.to || '(missing)');
+      row('tableA', 'Subject', d.subject || '(missing)');
+      row('tableA', 'In-Reply-To', d.inReplyTo || '(missing)');
+      row('tableA', 'References', (d.references || '').split(/\s+/).filter(Boolean).length + ' message IDs');
+      row('tableA', 'Quote (plain)', fmt((d.quote || '').length) + ' characters');
+      row('tableA', 'Quote (formatted)', fmt((d.quoteHtml || '').length) + ' characters of HTML (not displayed)');
+      row('tableA', 'Quote starts', (d.quote || '').slice(0, 600) + ((d.quote || '').length > 600 ? '\n…' : ''), true);
+      row('tableA', 'Quote ends', (d.quote || '').slice(-200), true);
+    }).catch(function (err) {
+      say('statusA', 'bad', 'RESULT A: FAILED: ' + err.message);
+    });
+  }
+
+  // B. This page's own sign-in.
+  var tokenClient = null;
+  function readWithPageToken(token, how) {
+    say('statusB', '', 'Reading…');
+    readFile(token).then(function (d) {
+      say('statusB', 'ok', 'RESULT B: the page sees the add-on\'s file (' + how + '). Quote: ' +
+        fmt((d.quote || '').length) + ' characters.');
+    }).catch(function (err) {
+      say('statusB', 'bad', 'RESULT B: signed in (' + how + '), but reading failed: ' + err.message +
+        (/404/.test(err.message) ? ' (404 usually means this client can\'t see the add-on\'s hidden folder)' : ''));
+    });
+  }
+  $('btnB').addEventListener('click', function () {
+    var saved = null;
+    try { saved = JSON.parse(storeGet('sis_page_token') || 'null'); } catch (e) {}
+    if (saved && saved.exp > Date.now() + 60000) {
+      readWithPageToken(saved.token, 'reused a saved sign-in, no pop-up');
+      return;
+    }
+    if (!(window.google && google.accounts && google.accounts.oauth2)) {
+      say('statusB', 'bad', 'Google sign-in library not loaded (a script blocker?).');
+      return;
+    }
+    if (CLIENT_ID.indexOf('PASTE') === 0) {
+      say('statusB', 'bad', 'CLIENT_ID not set in drivetest.html.');
+      return;
+    }
+    if (!tokenClient) {
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPE,
+        prompt: '',
+        callback: function (resp) {
+          if (resp.error) { say('statusB', 'bad', 'RESULT B: sign-in failed: ' + resp.error); return; }
+          storeSet('sis_page_token', JSON.stringify({ token: resp.access_token, exp: Date.now() + (resp.expires_in || 3600) * 1000 }));
+          readWithPageToken(resp.access_token, 'signed in with a pop-up');
+        },
+        error_callback: function (err) { say('statusB', 'bad', 'RESULT B: pop-up problem: ' + (err && err.type)); }
+      });
+    }
+    tokenClient.requestAccessToken();
+  });
+
+  // C. Delete with the add-on token.
+  $('btnC').addEventListener('click', function () {
+    if (!addonToken) { say('statusC', 'bad', 'No add-on token.'); return; }
+    fetch(API + encodeURIComponent(fileId), { method: 'DELETE', headers: { Authorization: 'Bearer ' + addonToken } })
+      .then(function (r) {
+        if (r.status === 204) say('statusC', 'ok', 'Deleted.');
+        else return r.text().then(function (b) { say('statusC', 'bad', 'Delete failed: HTTP ' + r.status + ' ' + b.slice(0, 200)); });
+      })
+      .catch(function (err) { say('statusC', 'bad', 'Delete failed: ' + err.message); });
+  });
+})();
+</script>
+</body>
+</html>
