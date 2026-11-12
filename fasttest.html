@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Fast test</title>
+<style>
+  body { font: 15px/1.45 -apple-system, system-ui, sans-serif; margin: 16px; color: #222; background: #fafafa; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .ok { color: #1b7f3b; font-weight: 600; }
+  .bad { color: #b3261e; font-weight: 600; }
+  .muted { color: #666; font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 8px; }
+  td { border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; word-break: break-all; }
+  td:first-child { width: 8em; color: #555; word-break: normal; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 12em; overflow: auto; }
+</style>
+</head>
+<body>
+<h1>Sent in Stone: fast test (4d)</h1>
+<p class="muted" id="prep"></p>
+<p id="status">Loading your reply…</p>
+<table id="fields"></table>
+<p class="muted">The page reads the email straight from Gmail with the add-on's short-lived passes. Email content is shown as plain text only; the passes came after "#" and are removed from the address bar on load.</p>
+
+<script>
+(function () {
+  function $(id) { return document.getElementById(id); }
+  function say(cls, text) { var el = $('status'); el.className = cls; el.textContent = text; }
+  function row(label, value, asPre) {
+    var tr = $('fields').insertRow();
+    tr.insertCell().textContent = label;
+    var td = tr.insertCell();
+    if (asPre) { var pre = document.createElement('pre'); pre.textContent = value; td.appendChild(pre); }
+    else td.textContent = value;
+  }
+  function fmt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function header(payload, name) {
+    var hs = (payload && payload.headers) || [];
+    for (var i = 0; i < hs.length; i++) if (hs[i].name.toLowerCase() === name.toLowerCase()) return hs[i].value;
+    return '';
+  }
+  function findPart(p, mime) {
+    if (!p) return null;
+    if (p.mimeType === mime && p.body && p.body.data) return p;
+    var parts = p.parts || [];
+    for (var i = 0; i < parts.length; i++) { var f = findPart(parts[i], mime); if (f) return f; }
+    return null;
+  }
+  function decode(data) {
+    var s = data.replace(/-/g, '+').replace(/_/g, '/');
+    var bin = atob(s);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+
+  var linkLength = location.href.length;
+  var params = new URLSearchParams((location.hash || '').slice(1));
+  var m = params.get('m'), t = params.get('t'), g = params.get('g'), ms = params.get('ms');
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+
+  if (!m || !t || !g) { say('bad', 'Missing message ID or passes in the link. Open this page from the add-on.'); return; }
+  $('prep').textContent = 'Add-on work: ' + fmt(ms) + ' ms. Link: ' + fmt(linkLength) + ' characters.';
+
+  var t0 = Date.now();
+  fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/' + encodeURIComponent(m) + '?format=full', {
+    headers: { 'Authorization': 'Bearer ' + t, 'X-Goog-Gmail-Access-Token': g }
+  }).then(function (r) {
+    if (!r.ok) return r.text().then(function (b) { throw new Error('HTTP ' + r.status + ': ' + b.slice(0, 300)); });
+    return r.json();
+  }).then(function (msg) {
+    var p = msg.payload;
+    var plain = findPart(p, 'text/plain');
+    var html = findPart(p, 'text/html');
+    var text = plain ? decode(plain.body.data) : '';
+    say('ok', 'RESULT: read straight from Gmail in ' + fmt(Date.now() - t0) + ' ms.');
+    row('From', header(p, 'From'));
+    row('Reply-To', header(p, 'Reply-To') || '(none)');
+    row('Subject', header(p, 'Subject'));
+    row('Message-ID', header(p, 'Message-ID') || '(missing)');
+    row('References', header(p, 'References') ? 'present' : '(none)');
+    row('Quote (plain)', fmt(text.length) + ' characters');
+    row('Quote (formatted)', html ? fmt(decode(html.body.data).length) + ' characters of HTML (not displayed)' : '(none)');
+    row('Quote starts', text.slice(0, 500) + (text.length > 500 ? '\n…' : ''), true);
+  }).catch(function (err) {
+    var hint = /Failed to fetch|NetworkError|Load failed/i.test(err.message)
+      ? ' (the browser blocked the request: Google may not allow this call from a web page)' : '';
+    say('bad', 'RESULT: FAILED: ' + err.message + hint);
+  });
+})();
+</script>
+</body>
+</html>
